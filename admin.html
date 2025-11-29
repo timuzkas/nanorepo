@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel</title>
+<style>
+:root {
+  --primary: #6366f1;
+  --danger: #ef4444;
+  --bg: #fafafa;
+  --surface: #fff;
+  --text: #111827;
+  --shadow: 0 4px 6px rgba(0,0,0,0.1);
+  --transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { 
+  font-family: system-ui, -apple-system, sans-serif; 
+  background: var(--bg); 
+  color: var(--text); 
+  padding: 1.5rem 1rem;  /* Fixed padding */
+}
+.container { max-width: 1000px; margin: 0 auto; display: grid; gap: 2rem; }
+.card { 
+  background: var(--surface); 
+  padding: 2rem;  /* Increased padding */
+  border-radius: 12px; 
+  box-shadow: var(--shadow); 
+}
+h1, h3 { margin-bottom: 1rem; }  /* Fixed margin */
+.subtitle { color: #6b7280; margin-bottom: 2rem; }
+.form-group { margin-bottom: 1.5rem; }  /* Fixed margin */
+input, select { 
+  width: 100%; 
+  padding: 1rem;  /* Increased padding */
+  border: 2px solid #e5e7eb; 
+  border-radius: 8px; 
+  transition: var(--transition);
+  margin-bottom: 0.75rem;  /* Fixed spacing */
+}
+input:last-child { margin-bottom: 0; }  /* Remove bottom margin on last input */
+input:focus, select:focus { 
+  outline: none; 
+  border-color: var(--primary); 
+  transform: scale(1.02); 
+}
+.btn { 
+  padding: 1rem 1.5rem;  /* Increased padding */
+  border: none; 
+  border-radius: 8px; 
+  font-weight: 600; 
+  cursor: pointer; 
+  transition: var(--transition);
+  margin-top: 1rem;  /* Fixed margin */
+}
+.btn:hover { transform: scale(1.05); }
+.btn-primary { background: var(--primary); color: white; }
+.btn-danger { background: var(--danger); color: white; }
+.pin-section { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+.album-grid, .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.album-item, .photo-item { background: var(--surface); padding: 1.5rem; border-radius: 12px; box-shadow: var(--shadow); transition: var(--transition); position: relative; }
+.album-item:hover, .photo-item:hover { transform: translateY(-4px); }
+.delete-btn { position: absolute; top: 0.75rem; right: 0.75rem; padding: 0.5rem 0.75rem; font-size: 0.75rem; }
+.upload-area { 
+  border: 3px dashed #e5e7eb; 
+  border-radius: 12px; 
+  padding: 2rem; 
+  text-align: center; 
+  transition: var(--transition); 
+  cursor: pointer; 
+  margin-bottom: 1rem;
+}
+.upload-area.dragover { border-color: var(--primary); background: rgba(99,102,241,0.05); transform: scale(1.02); }
+.upload-info { background: #f3f4f6; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; display: none; }
+.upload-info.show { display: block; }
+.upload-count { font-weight: 600; color: var(--primary); }
+.hidden { display: none; }
+#error { color: var(--danger); margin-top: 1rem; padding: 1rem; background: #fee2e2; border-radius: 8px; }
+@media (max-width: 768px) { 
+  .album-grid, .photo-grid { grid-template-columns: 1fr; } 
+  body { padding: 1rem 0.5rem; }
+  .card { padding: 1.5rem; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- PIN Setup (template-controlled) -->
+  {% if pin_set == "false" %}
+  <div class="card pin-section" id="pinSection">
+    <h2>Setup Admin PIN</h2>
+    <p class="subtitle">Create a PIN to manage albums</p>
+    <input type="password" id="newPin" placeholder="Enter new PIN">
+    <button class="btn btn-primary" onclick="setPin()">Set PIN</button>
+  </div>
+  {% endif %}
+
+  <!-- Main Admin Panel (shown after PIN is set) -->
+  <div id="adminContent" class="{{ pin_set == 'true' ? '' : 'hidden' }}">
+    <h1>Admin Panel</h1>
+    <p class="subtitle">Manage your photo albums</p>
+
+    <div class="card">
+      <h3>Create Album</h3>
+      <input id="albumName" placeholder="Album name">
+      <input type="password" id="createPin" placeholder="Enter PIN">
+      <button class="btn btn-primary" onclick="createAlbum()">Create</button>
+    </div>
+
+    <div class="card">
+      <h3>Upload Media</h3>
+      <select id="uploadAlbum"></select>
+      <input type="password" id="uploadPin" placeholder="Enter PIN">
+      
+      <!-- Upload info box -->
+      <div id="uploadInfo" class="upload-info">
+        <span class="upload-count">0 files selected</span>
+        <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">Click or drag photos to add more</p>
+      </div>
+      
+      <div class="upload-area" id="uploadArea">
+        <p>📸 Click to browse or drag & drop media here</p>
+        <input type="file" id="fileInput" multiple accept="image/*,video/*" class="hidden">
+      </div>
+     <button id="uploadBtn" class="btn btn-primary" onclick="uploadMedia()">Upload Media</button>    
+    </div>
+
+    <div class="card">
+      <h3>Albums</h3>
+      <div id="albumsList" class="album-grid"></div>
+    </div>
+
+    <div class="card">
+      <h3>Manage Photos</h3>
+      <select id="manageAlbum"></select>
+      <button class="btn btn-primary" onclick="loadMediaForMgmt()">Load Media</button>
+      <div id="photosList" class="photo-grid" style="margin-top:1.5rem;"></div>
+    </div>
+  </div>
+  
+  <div id="error"></div>
+</div>
+
+<script>
+let pinSet = {{ pin_set }};
+
+// LocalStorage PIN management
+function getStoredPin() {
+  return localStorage.getItem('galleryPin') || '';
+}
+
+function storePin(pin) {
+  localStorage.setItem('galleryPin', pin);
+}
+
+function clearStoredPin() {
+  localStorage.removeItem('galleryPin');
+}
+
+// Load PIN into all PIN inputs
+function populatePinInputs() {
+  const pin = getStoredPin();
+  const pinInputs = ['createPin', 'uploadPin'];
+  pinInputs.forEach(id => {
+    const input = document.getElementById(id);
+    if (input && !input.value) input.value = pin;
+  });
+}
+
+function showError(msg) {
+  const errorDiv = document.getElementById('error');
+  errorDiv.textContent = msg;
+  setTimeout(() => errorDiv.textContent = '', 5000);
+}
+
+async function checkPin() {
+  if (pinSet) {
+    await loadAlbums();
+    populatePinInputs();  // Load stored PIN
+  }
+}
+
+async function setPin() {
+  const pin = document.getElementById('newPin').value;
+  if (!pin) return showError('Enter PIN');
+  try {
+    const res = await fetch('/api/pin', { method: 'POST', body: new URLSearchParams({ pin }) });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text);
+    
+    storePin(pin);  // Store PIN locally
+    alert('PIN set! Please refresh the page.');
+    document.getElementById('newPin').value = '';
+  } catch (e) {
+    showError('Failed to set PIN: ' + e.message);
+  }
+}
+
+async function loadAlbums() {
+  const pin = prompt('Enter PIN');
+  if (!pin) return;
+  
+  try {
+    const res = await fetch('/api/albums', { headers: { 'X-PIN': pin } });
+    if (!res.ok) {
+      if (res.status === 401) throw new Error('Invalid PIN');
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const albums = await res.json();
+    
+    ['uploadAlbum','manageAlbum'].forEach(id => {
+      const sel = document.getElementById(id);
+      sel.innerHTML = albums.map(a => `<option value="${a}">${a}</option>`).join('');
+    });
+    
+    const list = document.getElementById('albumsList');
+    list.innerHTML = albums.map(a => `
+      <div class="album-item">
+        <h4>${a}</h4>
+        <button class="btn btn-danger delete-btn" onclick="deleteAlbum('${a}', '${pin}')">Delete</button>
+      </div>
+    `).join('');
+    
+    // Store PIN and populate inputs
+    storePin(pin);
+    populatePinInputs();
+  } catch (e) {
+    showError('Failed to load albums: ' + e.message);
+  }
+}
+
+async function createAlbum() {
+  const name = document.getElementById('albumName').value;
+  const pin = document.getElementById('createPin').value;
+  if (!name || !pin) return showError('Fill all fields');
+  
+  try {
+    const res = await fetch('/api/albums', { 
+      method: 'POST', 
+      headers: { 'X-PIN': pin },
+      body: new URLSearchParams({ name }) 
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text);
+    alert('Album created!');
+    document.getElementById('albumName').value = '';
+    document.getElementById('createPin').value = '';
+    await loadAlbums();
+  } catch (e) {
+    showError('Failed to create album: ' + e.message);
+  }
+}
+
+async function deleteAlbum(name, pin) {
+  if (!confirm(`Delete album "${name}" and all its photos?`)) return;
+  try {
+    const res = await fetch(`/api/albums/${name}`, { 
+      method: 'DELETE', 
+      headers: { 'X-PIN': pin } 
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text);
+    alert('Album deleted');
+    await loadAlbums();
+  } catch (e) {
+    showError('Failed to delete album: ' + e.message);
+  }
+}
+
+// Enhanced upload functionality
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
+const uploadInfo = document.getElementById('uploadInfo');
+const uploadCount = uploadInfo.querySelector('.upload-count');
+
+uploadArea.onclick = () => fileInput.click();
+uploadArea.ondragover = e => { e.preventDefault(); uploadArea.classList.add('dragover'); };
+uploadArea.ondragleave = () => uploadArea.classList.remove('dragover');
+uploadArea.ondrop = e => { 
+  e.preventDefault(); 
+  uploadArea.classList.remove('dragover'); 
+  fileInput.files = e.dataTransfer.files;
+  updateFileCount();
+};
+
+fileInput.onchange = updateFileCount;
+
+function updateFileCount() {
+  const count = fileInput.files.length;
+  if (count > 0) {
+    uploadCount.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
+    uploadInfo.classList.add('show');
+  } else {
+    uploadInfo.classList.remove('show');
+  }
+}
+
+async function uploadMedia() {
+  const album = document.getElementById('uploadAlbum').value;
+  const pin = document.getElementById('uploadPin').value;
+  
+  if (!album || !pin || !fileInput.files.length) {
+    return showError('Fill all fields and select photos');
+  }
+  
+  const fd = new FormData(); 
+  fd.append('album', album);
+  for (const f of fileInput.files) {
+    fd.append('media', f, f.name);
+  }
+  
+  try {
+    const button = document.getElementById('uploadBtn');
+    const originalText = button.textContent;
+    
+    button.textContent = 'Uploading...';
+    button.disabled = true;
+    
+    const res = await fetch(`/api/albums/${album}/media`, { 
+      method: 'POST', 
+      headers: { 'X-PIN': pin }, 
+      body: fd 
+    });
+    
+    const text = await res.text();
+    
+    if (!res.ok) {
+      throw new Error(text);
+    }
+    
+    alert(`✅ Successfully uploaded ${fileInput.files.length} media items!`);
+    fileInput.value = '';
+    updateFileCount();
+    
+  } catch (e) {
+    showError('Upload failed: ' + e.message);
+  } finally {
+    const button = document.getElementById('uploadBtn');
+    if (button) {
+      button.textContent = 'Upload Media';
+      button.disabled = false;
+    }
+  }
+}
+
+async function loadMediaForMgmt() {
+  const album = document.getElementById('manageAlbum').value;
+  const pin = prompt('Enter PIN');
+  if (!pin || !album) return;
+  
+  try {
+    const res = await fetch(`/api/albums/${album}/media`, { headers: { 'X-PIN': pin } });
+    if (!res.ok) {
+      if (res.status === 401) throw new Error('Invalid PIN');
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const media = await res.json();
+    
+    const list = document.getElementById('photosList'); // Keep ID as photosList for now
+    if (!media.length) {
+      list.innerHTML = '<p style="text-align:center;color:#6b7280;">No media in this album</p>';
+      return;
+    }
+    
+    list.innerHTML = media.map(m => {
+      const isVideo = m.endsWith('.mp4') || m.endsWith('.webm') || m.endsWith('.ogg');
+      const mediaElement = isVideo 
+        ? `<video src="/uploads/${album}/${m}" style="width:100%;height:150px;object-fit:cover;border-radius:8px;" muted loop></video>`
+        : `<img src="/uploads/${album}/${m}" style="width:100%;height:150px;object-fit:cover;border-radius:8px;">`;
+
+      return `
+        <div class="photo-item">
+          ${mediaElement}
+          <p style="margin-top:1rem;font-size:0.875rem;word-break:break-all;">${m}</p>
+          <button class="btn btn-danger delete-btn" onclick="deleteMedia('${album}','${m}','${pin}')">Delete</button>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    showError('Failed to load media: ' + e.message);
+  }
+}
+
+async function deleteMedia(album, file, pin) {
+  if (!confirm(`Delete "${file}"?`)) return;
+  try {
+    const res = await fetch(`/api/albums/${album}/media/${file}`, { 
+      method: 'DELETE', 
+      headers: { 'X-PIN': pin } 
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text);
+    alert('Media deleted');
+    await loadMediaForMgmt();
+  } catch (e) {
+    showError('Failed to delete media: ' + e.message);
+  }
+}
+
+// Initialize
+checkPin();
+</script>
+</body>
+</html>
+
+

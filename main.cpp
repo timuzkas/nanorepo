@@ -1,0 +1,423 @@
+#include "httplib.h"
+#include "template.hpp"
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <random>
+#include <chrono>
+#include <algorithm>
+#include <cstdlib>
+#include <exception>
+
+using namespace std;
+namespace fs = std::filesystem;
+
+string PIN;
+const string PIN_FILE = "uploads/.pin";
+
+// Utilities
+string getMimeType(const string& f) {
+    const string ext = fs::path(f).extension().string();
+    if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+    if (ext == ".png") return "image/png";
+    if (ext == ".gif") return "image/gif";
+    if (ext == ".webp") return "image/webp";
+    if (ext == ".mp4") return "video/mp4";
+    if (ext == ".webm") return "video/webm";
+    if (ext == ".ogg") return "video/ogg";
+    return "application/octet-stream";
+}
+
+string sanitize(const string& s) {
+    string r; 
+    for (char c : s) if (isalnum(c) || c == ' ' || c == '-') r += c;
+    return r.empty() ? "unnamed" : r;
+}
+
+string genFilename(const string& orig) {
+    random_device rd; mt19937 gen(rd());
+    auto t = chrono::duration_cast<chrono::seconds>(
+        chrono::system_clock::now().time_since_epoch()).count();
+    return to_string(t) + "_" + to_string(uniform_int_distribution<>(1000, 9999)(gen)) + 
+           fs::path(orig).extension().string();
+}
+
+bool auth(const httplib::Request& req) {
+    return !PIN.empty() && req.has_header("X-PIN") && req.get_header_value("X-PIN") == PIN;
+}
+
+void loadPin() {
+    if (fs::exists(PIN_FILE)) {
+        ifstream f(PIN_FILE);
+        if (f) getline(f, PIN);
+    } else if (getenv("PIN")) {
+        PIN = getenv("PIN");
+        ofstream(PIN_FILE) << PIN;
+    }
+}
+
+vector<string> listAlbums() {
+    vector<string> a;
+    if (!fs::exists("uploads")) return a;
+    try {
+        for (auto& e : fs::directory_iterator("uploads")) {
+            if (e.is_directory() && e.path().filename().string()[0] != '.') {
+                a.push_back(e.path().filename().string());
+            }
+        }
+        sort(a.begin(), a.end());
+    } catch (...) {}
+    return a;
+}
+
+vector<string> listMedia(const string& album) {
+    vector<string> p;
+    const string path = "uploads/" + sanitize(album);
+    if (!fs::exists(path)) return p;
+    try {
+        for (auto& e : fs::directory_iterator(path)) {
+            if (e.is_regular_file() && e.path().extension() != ".pin") {
+                p.push_back(e.path().filename().string());
+            }
+        }
+        sort(p.rbegin(), p.rend());
+    } catch (...) {}
+    return p;
+}
+
+// API
+void pinStatus(const httplib::Request&, httplib::Response& res) {
+    res.set_content(PIN.empty() ? "false" : "true", "text/plain");
+}
+
+void setPin(const httplib::Request& req, httplib::Response& res) {
+    if (!PIN.empty() && !auth(req)) {
+        res.status = 401;
+        res.set_content("Unauthorized", "text/plain");
+        return;
+    }
+    if (!req.has_param("pin")) {
+        res.status = 400;
+        res.set_content("Missing PIN", "text/plain");
+        return;
+    }
+    PIN = req.get_param_value("pin");
+    ofstream(PIN_FILE) << PIN;
+    res.set_content("PIN set", "text/plain");
+}
+
+void getAlbums(const httplib::Request& req, httplib::Response& res) {
+    try {
+        if (!auth(req)) {
+            res.status = 401;
+            res.set_content("[]", "application/json");
+            return;
+        }
+        auto albums = listAlbums();
+        stringstream j; j << "[";
+        for (size_t i = 0; i < albums.size(); ++i) {
+            j << "\"" << albums[i] << "\"";
+            if (i < albums.size() - 1) j << ",";
+        }
+        j << "]";
+        res.set_content(j.str(), "application/json");
+    } catch (...) {
+        res.status = 500;
+        res.set_content("[]", "application/json");
+    }
+}
+
+void createAlbum(const httplib::Request& req, httplib::Response& res) {
+    try {
+        if (!auth(req)) {
+            res.status = 401;
+            res.set_content("Unauthorized", "text/plain");
+            return;
+        }
+        if (!req.has_param("name")) {
+            res.status = 400;
+            res.set_content("Missing name", "text/plain");
+            return;
+        }
+        const string name = sanitize(req.get_param_value("name"));
+        if (fs::create_directories("uploads/" + name)) {
+            res.set_content("Album created", "text/plain");
+        } else {
+            res.status = 500;
+            res.set_content("Failed", "text/plain");
+        }
+    } catch (...) {
+        res.status = 500;
+        res.set_content("Error", "text/plain");
+    }
+}
+
+void deleteAlbum(const httplib::Request& req, httplib::Response& res) {
+    try {
+        if (!auth(req)) {
+            res.status = 401;
+            res.set_content("Unauthorized", "text/plain");
+            return;
+        }
+        const string name = sanitize(req.path_params.at("name"));
+        fs::remove_all("uploads/" + name);
+        res.set_content("Deleted", "text/plain");
+    } catch (...) {
+        res.status = 500;
+        res.set_content("Failed", "text/plain");
+    }
+}
+
+void getMedia(const httplib::Request& req, httplib::Response& res) {
+    try {
+        const string album = sanitize(req.path_params.at("album"));
+        auto photos = listMedia(album);
+        stringstream j; j << "[";
+        for (size_t i = 0; i < photos.size(); ++i) {
+            j << "\"" << photos[i] << "\"";
+            if (i < photos.size() - 1) j << ",";
+        }
+        j << "]";
+        res.set_content(j.str(), "application/json");
+    } catch (...) {
+        res.status = 500;
+        res.set_content("[]", "application/json");
+    }
+}
+
+void uploadMedia(const httplib::Request& req, httplib::Response& res) {
+    try {
+        if (!auth(req)) {
+            res.status = 401;
+            res.set_content("Unauthorized", "text/plain");
+            return;
+        }
+        
+        // Check for album in form fields OR query parameters
+        string album;
+        if (req.has_param("album")) {
+            album = req.get_param_value("album");
+        } else {
+            // Try to get album from path if it exists
+            auto album_it = req.path_params.find("album");
+            if (album_it != req.path_params.end()) {
+                album = album_it->second;
+            } else {
+                res.status = 400;
+                res.set_content("Missing album parameter", "text/plain");
+                return;
+            }
+        }
+        
+        album = sanitize(album);
+        const string path = "uploads/" + album;
+        
+        if (!fs::exists(path)) {
+            res.status = 404;
+            res.set_content("Album not found", "text/plain");
+            return;
+        }
+        
+        int uploaded = 0;
+        for (auto& [field, file] : req.form.files) {
+            if (field != "media") continue;
+            const string out = path + "/" + genFilename(file.filename);
+            ofstream(out, ios::binary).write(file.content.data(), file.content.size());
+            uploaded++;
+        }
+        
+        res.set_content(uploaded ? ("Uploaded " + to_string(uploaded) + " media items") : "No files uploaded", "text/plain");
+    } catch (...) {
+        res.status = 500;
+        res.set_content("Upload failed", "text/plain");
+    }
+}
+
+void deleteMedia(const httplib::Request& req, httplib::Response& res) {
+    try {
+        if (!auth(req)) {
+            res.status = 401;
+            res.set_content("Unauthorized", "text/plain");
+            return;
+        }
+        const string album = sanitize(req.path_params.at("album"));
+        const string file = req.path_params.at("filename");
+        fs::remove("uploads/" + album + "/" + file);
+        res.set_content("Deleted", "text/plain");
+    } catch (...) {
+        res.status = 500;
+        res.set_content("Failed", "text/plain");
+    }
+}
+
+string url_decode(const string& str) {
+    string result;
+    for (size_t i = 0; i < str.length(); ++i) {
+        if (str[i] == '%' && i + 2 < str.length()) {
+            int hex1 = (str[i+1] >= '0' && str[i+1] <= '9') ? str[i+1] - '0' : 
+                      (str[i+1] >= 'A' && str[i+1] <= 'F') ? str[i+1] - 'A' + 10 :
+                      (str[i+1] >= 'a' && str[i+1] <= 'f') ? str[i+1] - 'a' + 10 : 0;
+            int hex2 = (str[i+2] >= '0' && str[i+2] <= '9') ? str[i+2] - '0' : 
+                      (str[i+2] >= 'A' && str[i+2] <= 'F') ? str[i+2] - 'A' + 10 :
+                      (str[i+2] >= 'a' && str[i+2] <= 'f') ? str[i+2] - 'a' + 10 : 0;
+            result += static_cast<char>(hex1 * 16 + hex2);
+            i += 2;
+        } else if (str[i] == '+') {
+            result += ' ';
+        } else {
+            result += str[i];
+        }
+    }
+    return result;
+}
+
+// Pages
+void serveGallery(const httplib::Request& req, httplib::Response& res) {
+    Template tmpl = Template::fromFile("gallery.html");
+    tmpl.clear();
+    
+    string event_from_url;
+    if (!req.path_params.empty() && req.path_params.count("event")) {
+        event_from_url = url_decode(req.path_params.at("event"));
+    }
+    
+    auto albums = listAlbums();
+    
+    string current_album = "";
+    for (const auto& album : albums) {
+        if (album == event_from_url) {
+            current_album = album;
+            break;
+        }
+    }
+    
+    tmpl.set("site_title", "Photo Gallery")
+        .set("current_album", current_album)
+        .setList("albums", albums);
+    
+    if (!current_album.empty()) {
+        tmpl.setList("photos", listMedia(current_album));
+    }
+    
+    res.set_content(tmpl.render(), "text/html");
+}
+
+void serveAdmin(const httplib::Request&, httplib::Response& res) {
+    Template tmpl = Template::fromFile("admin.html");
+    tmpl.clear();
+    
+    tmpl.set("pin_set", PIN.empty() ? "false" : "true");
+    res.set_content(tmpl.render(), "text/html");
+}
+
+void serveFile(const httplib::Request& req, httplib::Response& res) {
+    try {
+        const string path = "uploads/" + sanitize(req.path_params.at("event")) + "/" + req.path_params.at("filename");
+        if (!fs::exists(path)) {
+            res.status = 404;
+            res.set_content("Not found", "text/plain");
+            return;
+        }
+        ifstream f(path, ios::binary);
+        res.set_content(string((istreambuf_iterator<char>(f)), {}), getMimeType(path));
+    } catch (...) {
+        res.status = 500;
+        res.set_content("Error", "text/plain");
+    }
+}
+
+string base64_decode(const string& input) {
+    static const string base64_chars = 
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789+/";
+    
+    string result;
+    int val = 0, valb = -8;
+    
+    for (unsigned char c : input) {
+        if (c == '=') break;
+        if (base64_chars.find(c) == string::npos) continue;
+        
+        val = (val << 6) + base64_chars.find(c);
+        valb += 6;
+        
+        if (valb >= 0) {
+            result.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return result;
+}
+
+
+void serveFavicon(const httplib::Request&, httplib::Response& res) {
+    // Base64 encoded SVG (you can generate this online)
+    string b64_favicon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB4PSIyMCIgeT0iMzAiIHdpZHRoPSI2MCIgaGVpZ2h0PSI0NSIgcng9IjUiIGZpbGw9IiM2MzY2ZjEiIHN0cm9rZT0iIzRmNDZlNSIgc3Ryb2tlLXdpZHRoPSIyIi8+PHJlY3QgeD0iMjUiIHk9IjM1IiB3aWR0aD0iNTAiIGhlaWdodD0iMzUiIHJ4PSIzIiBmaWxsPSIjZmZmZmZmIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MiIgcj0iMTIiIGZpbGw9IiM2MzY2ZjEiLz48Y2lyY2xlIGN4PSI1MCIgY3k9IjUyIiByPSI4IiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeD0iMTUiIHk9IjI1IiB3aWR0aD0iMTIiIGhlaWdodD0iOCIgcng9IjIiIGZpbGw9IiM2MzY2ZjEiLz48cmVjdCB4PSI3MyIgeT0iMjUiIHdpZHRoPSIxMiIgaGVpZ2h0PSI4IiByeD0iMiIgZmlsbD0iIzYzNjZmMSIvPjxjaXJjbGUgY3g9IjM1IiBjeT0iNDIiIHI9IjMiIGZpbGw9IiM2MzY2ZjEiLz48L3N2Zz4=";
+    
+    // Decode base64 (you'd need a base64 decode function)
+    string favicon_svg = base64_decode(b64_favicon);
+    res.set_content(favicon_svg, "image/svg+xml");
+}
+
+int main() {
+    auto start_time = chrono::high_resolution_clock::now();
+    
+    loadPin();
+    int port = 8080;
+    if (const char* env_p = getenv("PORT")) {
+        try {
+            port = stoi(env_p);
+        } catch (...) {}
+    }
+    fs::create_directories("uploads");
+    
+    httplib::Server svr;
+    
+    svr.Get("/favicon.ico", serveFavicon);
+
+    svr.Get("/admin", serveAdmin);
+    
+    // Gallery routes
+    svr.Get("/:event", serveGallery);
+    svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
+        auto albums = listAlbums();
+        if (albums.empty()) {
+            res.set_content("No albums. Visit /admin to create one.", "text/plain");
+        } else {
+            res.set_redirect(("/" + albums[0]).c_str());
+        }
+    });    
+    // Static files
+    svr.Get("/uploads/:event/:filename", serveFile);
+    
+    // API
+    svr.Get("/api/pin/status", pinStatus);
+    svr.Post("/api/pin", setPin);
+    svr.Get("/api/albums", getAlbums);
+    svr.Post("/api/albums", createAlbum);
+    svr.Delete("/api/albums/:name", deleteAlbum);
+    svr.Get("/api/albums/:album/media", getMedia);
+    svr.Post("/api/albums/:album/media", uploadMedia);
+    svr.Delete("/api/albums/:album/media/:filename", deleteMedia);
+    
+    auto end_time = chrono::high_resolution_clock::now();
+    auto startup_duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+    
+    cout << "\n===========================================\n";
+    cout << "Photo Gallery Server\n";
+    cout << "===========================================\n";
+    cout << "URL: http://0.0.0.0:" << port << "\n";
+    if (!PIN.empty()) cout << "Admin PIN: " << PIN << "\n";
+    else cout << "No PIN set. Visit /admin to create one.\n";
+    cout << "Startup time: " << startup_duration.count() << "ms\n";
+    cout << "===========================================\n\n";
+
+	
+    
+    
+    svr.listen("0.0.0.0", port);
+    return 0;
+}
+
+
