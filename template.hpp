@@ -915,7 +915,7 @@ private:
                                     filter_value = apply_filter(original_value, filter_name, filter_args);
                                     filter_type = TokenType::String; // Filter results are always strings
                                     
-                                    cout << "DEBUG: Applied filter " << filter_name << " to '" << left_operand << "' -> '" << filter_value << "'" << endl;
+                                    //cout << "DEBUG: Applied filter " << filter_name << " to '" << left_operand << "' -> '" << filter_value << "'" << endl;
                                 }
                             }
 

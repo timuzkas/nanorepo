@@ -8,9 +8,21 @@
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
+#include <iostream> // For logging
+#include <iomanip>  // For put_time
+#include <ctime>    // For localtime, time_t
 
 using namespace std;
+using namespace std::chrono;
 namespace fs = std::filesystem;
+
+// Helper function for logging with timestamp
+void log_message(const string& msg) {
+    auto now = system_clock::now();
+    auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+    time_t t = system_clock::to_time_t(now);
+    cout << "[" << put_time(localtime(&t), "%H:%M:%S") << "." << setfill('0') << setw(3) << ms.count() << "] " << msg << endl;
+}
 
 string PIN;
 const string PIN_FILE = "uploads/.pin";
@@ -207,6 +219,7 @@ void getMedia(const httplib::Request& req, httplib::Response& res) {
 }
 
 void uploadMedia(const httplib::Request& req, httplib::Response& res) {
+    log_message("Handling /upload request for album: " + (req.has_param("album") ? req.get_param_value("album") : "N/A"));
     try {
         if (!auth(req)) {
             res.status = 401;
@@ -224,6 +237,7 @@ void uploadMedia(const httplib::Request& req, httplib::Response& res) {
             if (album_it != req.path_params.end()) {
                 album = album_it->second;
             } else {
+                log_message("Upload failed: Missing album parameter.");
                 res.status = 400;
                 res.set_content("Missing album parameter", "text/plain");
                 return;
@@ -234,6 +248,7 @@ void uploadMedia(const httplib::Request& req, httplib::Response& res) {
         const string path = "uploads/" + album;
         
         if (!fs::exists(path)) {
+            log_message("Upload failed: Album not found: " + album);
             res.status = 404;
             res.set_content("Album not found", "text/plain");
             return;
@@ -247,8 +262,14 @@ void uploadMedia(const httplib::Request& req, httplib::Response& res) {
             uploaded++;
         }
         
+        log_message("Uploaded " + to_string(uploaded) + " media items to album: " + album);
         res.set_content(uploaded ? ("Uploaded " + to_string(uploaded) + " media items") : "No files uploaded", "text/plain");
+    } catch (const exception& e) {
+        log_message("Upload failed: " + string(e.what()));
+        res.status = 500;
+        res.set_content("Upload failed", "text/plain");
     } catch (...) {
+        log_message("Upload failed: Unknown error.");
         res.status = 500;
         res.set_content("Upload failed", "text/plain");
     }
@@ -314,6 +335,7 @@ string url_encode(const string &value) {
 
 // Pages
 void serveGallery(const httplib::Request& req, httplib::Response& res) {
+    log_message("Serving gallery for event: " + (req.path_params.count("event") ? url_decode(req.path_params.at("event")) : "N/A"));
     Template tmpl = Template::fromFile("gallery.html");
     tmpl.clear();
 
@@ -358,7 +380,8 @@ void serveGallery(const httplib::Request& req, httplib::Response& res) {
     res.set_content(tmpl.render(), "text/html");
 }
 
-void serveAdmin(const httplib::Request&, httplib::Response& res) {
+void serveAdmin(const httplib::Request& req, httplib::Response& res) {
+    log_message("Serving admin page.");
     Template tmpl = Template::fromFile("admin.html");
     tmpl.clear();
     
@@ -367,6 +390,7 @@ void serveAdmin(const httplib::Request&, httplib::Response& res) {
 }
 
 void serveFile(const httplib::Request& req, httplib::Response& res) {
+    log_message("Serving file: " + req.path_params.at("filename") + " from event: " + req.path_params.at("event"));
     try {
         const string path = "uploads/" + sanitize(req.path_params.at("event")) + "/" + req.path_params.at("filename");
         if (!fs::exists(path)) {
@@ -415,7 +439,7 @@ void serveFavicon(const httplib::Request&, httplib::Response& res) {
 }
 
 int main() {
-    auto start_time = chrono::high_resolution_clock::now();
+    auto startup_start_time = chrono::high_resolution_clock::now();
     
     loadPin();
     int port = 8080;
@@ -433,16 +457,21 @@ int main() {
     svr.set_write_timeout(600, 0);
     // ----------------------------------------------
 
+    // Request logging middleware
+    svr.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+        log_message("REQ: " + req.method + " " + req.path + " (Status: " + to_string(res.status) + ")");
+    });
+
     svr.Get("/favicon.ico", serveFavicon);
     svr.Get("/admin", serveAdmin);
 
     // Standard Routes
-    svr.Get("/:event", serveGallery);
     svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
         auto albums = listAlbums();
         if (albums.empty()) res.set_content("No albums.", "text/plain");
         else res.set_redirect(("/" + url_encode(albums[0])).c_str());
     });    
+    svr.Get("/:event", serveGallery);
     svr.Get("/uploads/:event/:filename", serveFile);
     
     // API Routes
@@ -457,6 +486,7 @@ int main() {
     // --- NEW STREAMING UPLOAD HANDLER ---
     // This accepts raw binary data instead of multipart/form-data
     svr.Post("/api/stream_upload", [&](const httplib::Request &req, httplib::Response &res, const httplib::ContentReader &content_reader) {
+            log_message("Handling /api/stream_upload request for album: " + url_decode(req.get_header_value("X-Album")));
             if (!auth(req)) {
                 res.status = 401;
                 res.set_content("Unauthorized", "text/plain");
@@ -520,8 +550,10 @@ int main() {
             res.set_content("Chunk Received", "text/plain");
         });
     // ------------------------------------
-    
-    cout << "Server running on port " << port << " with Streaming Support.\n";
+
+    auto startup_end_time = chrono::high_resolution_clock::now();
+    auto startup_duration_ms = duration_cast<milliseconds>(startup_end_time - startup_start_time).count();
+    log_message("Server startup completed in " + to_string(startup_duration_ms) + "ms. Listening on port " + to_string(port));
     svr.listen("0.0.0.0", port);
     return 0;
 }
