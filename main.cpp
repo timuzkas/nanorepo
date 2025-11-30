@@ -24,14 +24,35 @@ string getMimeType(const string& f) {
     if (ext == ".webp") return "image/webp";
     if (ext == ".mp4") return "video/mp4";
     if (ext == ".webm") return "video/webm";
+    if (ext == ".mov") return "video/mov";
+    if (ext == ".mpv") return "video/mpv";
     if (ext == ".ogg") return "video/ogg";
     return "application/octet-stream";
 }
 
 string sanitize(const string& s) {
-    string r; 
-    for (char c : s) if (isalnum(c) || c == ' ' || c == '-') r += c;
-    return r.empty() ? "unnamed" : r;
+    string r;
+    for (char c : s) {
+        unsigned char uc = static_cast<unsigned char>(c);
+
+        if (uc > 127) {
+            r += c;
+            continue;
+        }
+
+        if (isalnum(uc)) {
+            r += c;
+            continue;
+        }
+        
+        if (c == ' ' || c == '-' || c == '_' || c == '.') {
+            r += c;
+        }
+    }
+
+    if (r.empty() || r == "." || r == "..") return "unnamed";
+    
+    return r;
 }
 
 string genFilename(const string& orig) {
@@ -275,6 +296,21 @@ string url_decode(const string& str) {
 void serveGallery(const httplib::Request& req, httplib::Response& res) {
     Template tmpl = Template::fromFile("gallery.html");
     tmpl.clear();
+
+	tmpl.addFilter("is_video", [](const vector<string>& args) {
+	    if (args.empty()) return "false";
+	    
+	    static const vector<string> video_exts = {".mp4", ".webm", ".mov", ".mpg", ".ogg", ".mkv"};
+	    string filename = args[0];
+	    
+	    for (const auto& ext : video_exts) {
+	        if (filename.length() >= ext.length() && 
+	            filename.substr(filename.length() - ext.length()) == ext) {
+	            return "true";
+	        }
+	    }
+	    return "false";
+	});
     
     string event_from_url;
     if (!req.path_params.empty() && req.path_params.count("event")) {

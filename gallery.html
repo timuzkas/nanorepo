@@ -276,7 +276,7 @@
 <div id="gallery" class="grid">
     {% for media_item in photos %}
     <div class="photo-card" style="animation-delay: {{ loop.index0 * 0.05 }}s">
-        {% if media_item | endswith ".mp4" %}
+        {% if media_item | is_video %}
         <video src="/uploads/{{ current_album | url_encode }}/{{ media_item | url_encode }}" alt="{{ media_item }}" loading="lazy" muted loop playsinline></video>
         {% else %}
         <img src="/uploads/{{ current_album | url_encode }}/{{ media_item | url_encode }}" alt="{{ media_item }}" loading="lazy">
