@@ -419,57 +419,95 @@ int main() {
     
     loadPin();
     int port = 8080;
-    if (const char* env_p = getenv("PORT")) {
-        try {
-            port = stoi(env_p);
-        } catch (...) {}
-    }
+    if (const char* env_p = getenv("PORT")) port = stoi(env_p);
+    
     fs::create_directories("uploads");
     
     httplib::Server svr;
-    
-    svr.Get("/favicon.ico", serveFavicon);
 
+    // --- CRITICAL CONFIGURATION FOR BIG UPLOADS ---
+    // 1. Allow up to 1GB payload
+    svr.set_payload_max_length(1024 * 1024 * 1024); 
+    // 2. 10 Minute timeout for slow connections
+    svr.set_read_timeout(600, 0); 
+    svr.set_write_timeout(600, 0);
+    // ----------------------------------------------
+
+    svr.Get("/favicon.ico", serveFavicon);
     svr.Get("/admin", serveAdmin);
-    
-    // Gallery routes
+
+    // Standard Routes
     svr.Get("/:event", serveGallery);
     svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-            auto albums = listAlbums();
-            if (albums.empty()) {
-                res.set_content("No albums. Visit /admin to create one.", "text/plain");
-            } else {
-                string target = "/" + url_encode(albums[0]);
-                res.set_redirect(target.c_str());
-            }
-        });
+        auto albums = listAlbums();
+        if (albums.empty()) res.set_content("No albums.", "text/plain");
+        else res.set_redirect(("/" + url_encode(albums[0])).c_str());
+    });    
     svr.Get("/uploads/:event/:filename", serveFile);
     
-    // API
+    // API Routes
     svr.Get("/api/pin/status", pinStatus);
     svr.Post("/api/pin", setPin);
     svr.Get("/api/albums", getAlbums);
     svr.Post("/api/albums", createAlbum);
     svr.Delete("/api/albums/:name", deleteAlbum);
     svr.Get("/api/albums/:album/media", getMedia);
-    svr.Post("/api/albums/:album/media", uploadMedia);
     svr.Delete("/api/albums/:album/media/:filename", deleteMedia);
-    
-    auto end_time = chrono::high_resolution_clock::now();
-    auto startup_duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
-    
-    cout << "\n===========================================\n";
-    cout << "Photo Gallery Server\n";
-    cout << "===========================================\n";
-    cout << "URL: http://0.0.0.0:" << port << "\n";
-    if (!PIN.empty()) cout << "Admin PIN: " << PIN << "\n";
-    else cout << "No PIN set. Visit /admin to create one.\n";
-    cout << "Startup time: " << startup_duration.count() << "ms\n";
-    cout << "===========================================\n\n";
 
-	
+    // --- NEW STREAMING UPLOAD HANDLER ---
+    // This accepts raw binary data instead of multipart/form-data
+    svr.Post("/api/stream_upload", [&](const httplib::Request &req, httplib::Response &res, const httplib::ContentReader &content_reader) {
+        // 1. Check Auth (Headers are available before body)
+        if (!auth(req)) {
+            res.status = 401;
+            res.set_content("Unauthorized", "text/plain");
+            return;
+        }
+
+        // 2. Get Metadata from Headers (Safest for UTF-8)
+        if (!req.has_header("X-Album") || !req.has_header("X-Filename")) {
+            res.status = 400;
+            res.set_content("Missing Headers", "text/plain");
+            return;
+        }
+
+        string album = sanitize(url_decode(req.get_header_value("X-Album")));
+        string filename = url_decode(req.get_header_value("X-Filename"));
+        
+        string dir_path = "uploads/" + album;
+        if (!fs::exists(dir_path)) {
+            res.status = 404;
+            res.set_content("Album not found", "text/plain");
+            return;
+        }
+
+        // Generate safe unique filename
+        string final_path = dir_path + "/" + genFilename(filename);
+
+        // 3. Open File Stream
+        ofstream ofs(final_path, ios::binary);
+        if (!ofs) {
+            res.status = 500;
+            res.set_content("Cannot open file for writing", "text/plain");
+            return;
+        }
+
+        // 4. READ BODY IN CHUNKS (Streaming)
+        content_reader([&](const char *data, size_t data_length) {
+            ofs.write(data, data_length);
+            return true; // Continue reading
+        });
+
+        if (ofs.bad()) {
+            res.status = 500;
+            res.set_content("Disk Error", "text/plain");
+        } else {
+            res.set_content("Upload Successful", "text/plain");
+        }
+    });
+    // ------------------------------------
     
-    
+    cout << "Server running on port " << port << " with Streaming Support.\n";
     svr.listen("0.0.0.0", port);
     return 0;
 }
