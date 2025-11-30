@@ -457,54 +457,68 @@ int main() {
     // --- NEW STREAMING UPLOAD HANDLER ---
     // This accepts raw binary data instead of multipart/form-data
     svr.Post("/api/stream_upload", [&](const httplib::Request &req, httplib::Response &res, const httplib::ContentReader &content_reader) {
-        // 1. Check Auth (Headers are available before body)
-        if (!auth(req)) {
-            res.status = 401;
-            res.set_content("Unauthorized", "text/plain");
-            return;
-        }
-
-        // 2. Get Metadata from Headers (Safest for UTF-8)
-        if (!req.has_header("X-Album") || !req.has_header("X-Filename")) {
-            res.status = 400;
-            res.set_content("Missing Headers", "text/plain");
-            return;
-        }
-
-        string album = sanitize(url_decode(req.get_header_value("X-Album")));
-        string filename = url_decode(req.get_header_value("X-Filename"));
-        
-        string dir_path = "uploads/" + album;
-        if (!fs::exists(dir_path)) {
-            res.status = 404;
-            res.set_content("Album not found", "text/plain");
-            return;
-        }
-
-        // Generate safe unique filename
-        string final_path = dir_path + "/" + genFilename(filename);
-
-        // 3. Open File Stream
-        ofstream ofs(final_path, ios::binary);
-        if (!ofs) {
-            res.status = 500;
-            res.set_content("Cannot open file for writing", "text/plain");
-            return;
-        }
-
-        // 4. READ BODY IN CHUNKS (Streaming)
-        content_reader([&](const char *data, size_t data_length) {
-            ofs.write(data, data_length);
-            return true; // Continue reading
+            if (!auth(req)) {
+                res.status = 401;
+                res.set_content("Unauthorized", "text/plain");
+                return;
+            }
+    
+            if (!req.has_header("X-Album") || !req.has_header("X-Filename")) {
+                res.status = 400;
+                res.set_content("Missing Headers", "text/plain");
+                return;
+            }
+    
+            string album = sanitize(url_decode(req.get_header_value("X-Album")));
+            string filename = url_decode(req.get_header_value("X-Filename"));
+            
+            // Check for Offset (Default to 0 if missing)
+            size_t offset = 0;
+            if (req.has_header("X-Offset")) {
+                try {
+                    offset = stoull(req.get_header_value("X-Offset"));
+                } catch (...) { offset = 0; }
+            }
+    
+            string dir_path = "uploads/" + album;
+            if (!fs::exists(dir_path)) {
+                res.status = 404;
+                res.set_content("Album not found", "text/plain");
+                return;
+            }
+    
+            string final_path = dir_path + "/" + genFilename(filename); 
+            
+            // IMPORTANT: If offset > 0, we APPEND. If offset == 0, we OVERWRITE.
+            // Note: genFilename includes a timestamp, so for chunking to work, 
+            // the JS must send the exact SAME filename header for all chunks.
+            // However, your genFilename randomizes the name. 
+            // WE MUST DISABLE RANDOMIZATION FOR CHUNKS to work, or rely on client sending the target name.
+            // For simplicity, we will trust the client's filename here to allow appending.
+            
+            final_path = dir_path + "/" + filename; // TRUST CLIENT FILENAME FOR CHUNKING
+    
+            ios_base::openmode mode = ios::binary;
+            if (offset > 0) {
+                mode |= ios::app; // Append mode
+            } else {
+                mode |= ios::trunc; // Overwrite mode
+            }
+    
+            ofstream ofs(final_path, mode);
+            if (!ofs) {
+                res.status = 500;
+                res.set_content("Cannot open file", "text/plain");
+                return;
+            }
+    
+            content_reader([&](const char *data, size_t data_length) {
+                ofs.write(data, data_length);
+                return true;
+            });
+    
+            res.set_content("Chunk Received", "text/plain");
         });
-
-        if (ofs.bad()) {
-            res.status = 500;
-            res.set_content("Disk Error", "text/plain");
-        } else {
-            res.set_content("Upload Successful", "text/plain");
-        }
-    });
     // ------------------------------------
     
     cout << "Server running on port " << port << " with Streaming Support.\n";
