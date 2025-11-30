@@ -292,6 +292,26 @@ string url_decode(const string& str) {
     return result;
 }
 
+string url_encode(const string &value) {
+    ostringstream escaped;
+    escaped.fill('0');
+    escaped << hex;
+
+    for (string::const_iterator i = value.begin(), n = value.end(); i != n; ++i) {
+        string::value_type c = (*i);
+        // Keep alphanumeric and other safe characters
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+            continue;
+        }
+        // Any other character is percent-encoded
+        escaped << uppercase;
+        escaped << '%' << setw(2) << int((unsigned char) c);
+        escaped << nouppercase;
+    }
+    return escaped.str();
+}
+
 // Pages
 void serveGallery(const httplib::Request& req, httplib::Response& res) {
     Template tmpl = Template::fromFile("gallery.html");
@@ -388,10 +408,8 @@ string base64_decode(const string& input) {
 
 
 void serveFavicon(const httplib::Request&, httplib::Response& res) {
-    // Base64 encoded SVG (you can generate this online)
     string b64_favicon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB4PSIyMCIgeT0iMzAiIHdpZHRoPSI2MCIgaGVpZ2h0PSI0NSIgcng9IjUiIGZpbGw9IiM2MzY2ZjEiIHN0cm9rZT0iIzRmNDZlNSIgc3Ryb2tlLXdpZHRoPSIyIi8+PHJlY3QgeD0iMjUiIHk9IjM1IiB3aWR0aD0iNTAiIGhlaWdodD0iMzUiIHJ4PSIzIiBmaWxsPSIjZmZmZmZmIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSI1MiIgcj0iMTIiIGZpbGw9IiM2MzY2ZjEiLz48Y2lyY2xlIGN4PSI1MCIgY3k9IjUyIiByPSI4IiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeD0iMTUiIHk9IjI1IiB3aWR0aD0iMTIiIGhlaWdodD0iOCIgcng9IjIiIGZpbGw9IiM2MzY2ZjEiLz48cmVjdCB4PSI3MyIgeT0iMjUiIHdpZHRoPSIxMiIgaGVpZ2h0PSI4IiByeD0iMiIgZmlsbD0iIzYzNjZmMSIvPjxjaXJjbGUgY3g9IjM1IiBjeT0iNDIiIHI9IjMiIGZpbGw9IiM2MzY2ZjEiLz48L3N2Zz4=";
     
-    // Decode base64 (you'd need a base64 decode function)
     string favicon_svg = base64_decode(b64_favicon);
     res.set_content(favicon_svg, "image/svg+xml");
 }
@@ -417,14 +435,14 @@ int main() {
     // Gallery routes
     svr.Get("/:event", serveGallery);
     svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-        auto albums = listAlbums();
-        if (albums.empty()) {
-            res.set_content("No albums. Visit /admin to create one.", "text/plain");
-        } else {
-            res.set_redirect(("/" + albums[0]).c_str());
-        }
-    });    
-    // Static files
+            auto albums = listAlbums();
+            if (albums.empty()) {
+                res.set_content("No albums. Visit /admin to create one.", "text/plain");
+            } else {
+                string target = "/" + url_encode(albums[0]);
+                res.set_redirect(target.c_str());
+            }
+        });
     svr.Get("/uploads/:event/:filename", serveFile);
     
     // API

@@ -360,6 +360,49 @@ body {
 .stat-number { font-size: 2.5rem; font-weight: 700; line-height: 1; margin-bottom: 0.5rem; }
 .stat-label { font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; }
 
+/* PIN MODAL */
+#pinModal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 2rem;
+  max-width: 400px;
+  width: 90%;
+}
+
+.modal-content h2 {
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+  font-size: 1.2rem;
+}
+
+.modal-content input {
+  width: 100%;
+  margin: 1rem 0;
+}
+
+.modal-content button {
+  width: 100%;
+  padding: 0.8rem;
+  background: var(--primary);
+  color: var(--primary-inv);
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 @media (max-width: 768px) {
   .container { padding: 1rem; }
   .nav-tabs { gap: 1rem; overflow-x: auto; }
@@ -381,6 +424,7 @@ body {
 </div>
 
 <div class="container">
+
   
   <!-- PIN Setup Section -->
   {% if pin_set == "false" %}
@@ -403,15 +447,26 @@ body {
   </div>
   {% endif %}
 
+  <!-- PIN Modal for login -->
+  <div id="pinModal">
+    <div class="modal-content">
+      <h2>Admin Access</h2>
+      <p>Enter PIN to access admin panel</p>
+      <input type="password" id="newPinInput" placeholder="Enter PIN" class="form-input">
+      <br>
+      <button onclick="savePin()">Access</button>
+    </div>
+  </div>
+
   <!-- Main Admin Panel -->
   <div id="adminContent" class="{{ pin_set == 'true' ? '' : 'hidden' }}">
     
     <!-- Navigation Tabs -->
     <div class="nav-tabs">
-      <button class="nav-tab active" onclick="showTab('dashboard')">DASHBOARD</button>
-      <button class="nav-tab" onclick="showTab('albums')">ALBUMS</button>
-      <button class="nav-tab" onclick="showTab('upload')">UPLOAD</button>
-      <button class="nav-tab" onclick="showTab('media')">MEDIA</button>
+      <button class="nav-tab active" onclick="showTab('dashboard', this)">DASHBOARD</button>
+      <button class="nav-tab" onclick="showTab('albums', this)">ALBUMS</button>
+      <button class="nav-tab" onclick="showTab('upload', this)">UPLOAD</button>
+      <button class="nav-tab" onclick="showTab('media', this)">MEDIA</button>
     </div>
 
     <!-- Status Messages -->
@@ -442,8 +497,8 @@ body {
             <h3 class="card-title">QUICK ACTIONS</h3>
           </div>
           <div style="display: grid; gap: 0.5rem;">
-            <button class="btn btn-outline" onclick="showTab('albums')">Create Album</button>
-            <button class="btn btn-outline" onclick="showTab('upload')">Upload Data</button>
+            <button class="btn btn-outline" onclick="showTab('albums', this)">Create Album</button>
+            <button class="btn btn-outline" onclick="showTab('upload', this)">Upload Data</button>
             <button class="btn btn-outline" onclick="loadAlbums()">Refresh Database</button>
           </div>
         </div>
@@ -568,7 +623,6 @@ body {
     </div>
   </div>
 </div>
-
 <script>
 // --- THEME LOGIC (Matches Main Page) ---
 function getStoredTheme() { return localStorage.getItem('theme') || 'light'; }
@@ -576,6 +630,7 @@ function setTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
 }
+
 document.addEventListener('DOMContentLoaded', () => {
     setTheme(getStoredTheme());
     document.getElementById('themeToggle').addEventListener('click', () => {
@@ -585,20 +640,69 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- ADMIN LOGIC ---
-let pinSet = {{ pin_set }};
+// Handle PIN state more robustly
+function hasStoredPin() {
+    return !!localStorage.getItem('galleryPin');
+}
 
-function showTab(tabName) {
+function showPinModal() {
+    const modal = document.getElementById('pinModal');
+    const adminContent = document.getElementById('adminContent');
+    
+    modal.style.display = 'flex';
+    if (adminContent) {
+        adminContent.classList.add('hidden');
+    }
+    
+    setTimeout(() => {
+        const pinInput = document.getElementById('newPinInput');
+        if (pinInput) pinInput.focus();
+    }, 100);
+}
+
+function hidePinModal() {
+    const modal = document.getElementById('pinModal');
+    const adminContent = document.getElementById('adminContent');
+    
+    modal.style.display = 'none';
+    if (adminContent) {
+        adminContent.classList.remove('hidden');
+    }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Initializing admin panel...');
+    console.log('Stored PIN exists:', hasStoredPin());
+    
+    if (!hasStoredPin()) {
+        console.log('No PIN found, showing modal');
+        showPinModal();
+    } else {
+        console.log('PIN found, loading admin panel');
+        hidePinModal();
+        checkPin();
+    }
+});
+
+function showTab(tabName, element) {
   document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
   document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
   document.getElementById(tabName + 'Tab').classList.remove('hidden');
-  event.target.classList.add('active');
+  if (element) {
+    element.classList.add('active');
+  }
   
+  // Load content based on tab
   if (tabName === 'albums') loadAlbums();
   else if (tabName === 'dashboard') updateDashboard();
 }
 
 function getStoredPin() { return localStorage.getItem('galleryPin') || ''; }
-function storePin(pin) { localStorage.setItem('galleryPin', pin); }
+function storePin(pin) { 
+    localStorage.setItem('galleryPin', pin); 
+    console.log('PIN stored successfully');
+}
 
 function populatePinInputs() {
   const pin = getStoredPin();
@@ -611,6 +715,7 @@ function populatePinInputs() {
 function showStatus(message, type = 'success') {
   const statusDiv = document.getElementById('statusMessage');
   const errorDiv = document.getElementById('errorMessage');
+  
   statusDiv.classList.add('hidden');
   errorDiv.classList.add('hidden');
   
@@ -622,12 +727,38 @@ function showStatus(message, type = 'success') {
   setTimeout(() => targetDiv.classList.add('hidden'), 5000);
 }
 
+async function savePin() {
+    const pinInput = document.getElementById('newPinInput');
+    const pin = pinInput.value.trim();
+    
+    if (!pin) {
+        alert("Please enter a PIN");
+        return;
+    }
+
+    if (pin.length < 4) {
+        alert("PIN must be at least 4 characters");
+        return;
+    }
+
+    console.log('Saving PIN...');
+    storePin(pin);
+    hidePinModal();
+    checkPin();
+}
+
 async function checkPin() {
-  if (pinSet) {
+    console.log('Checking PIN...');
+    const pin = getStoredPin();
+    if (!pin) {
+        console.log('No PIN found, showing modal');
+        showPinModal();
+        return;
+    }
+    
     await loadAlbums();
     populatePinInputs();
     updateDashboard();
-  }
 }
 
 async function setPin() {
@@ -644,7 +775,7 @@ async function setPin() {
 
 async function loadAlbums() {
   const pin = getStoredPin();
-  if (!pin && pinSet) return; // Silent return if no pin stored yet
+  if (!pin) return;
   
   try {
     const res = await fetch('/api/albums', { headers: { 'X-PIN': pin } });
@@ -676,24 +807,30 @@ async function loadAlbums() {
     populatePinInputs();
     
   } catch (e) { 
-    if(pinSet) showStatus('Auth Failed', 'error'); 
+    console.error('Failed to load albums:', e);
+    showStatus('Auth Failed', 'error'); 
   }
 }
 
 async function updateDashboard() {
   try {
-    const albums = await fetch('/api/albums', { headers: { 'X-PIN': getStoredPin() } }).then(res => res.json());
+    const pin = getStoredPin();
+    if (!pin) return;
+    
+    const albums = await fetch('/api/albums', { headers: { 'X-PIN': pin } }).then(res => res.json());
     let totalFiles = 0;
     for (const album of albums) {
       try {
-        const media = await fetch(`/api/albums/${album}/media`, { headers: { 'X-PIN': getStoredPin() } }).then(res => res.json());
+        const media = await fetch(`/api/albums/${album}/media`, { headers: { 'X-PIN': pin } }).then(res => res.json());
         totalFiles += media.length;
       } catch (e) {}
     }
     document.getElementById('albumCount').textContent = albums.length;
     document.getElementById('totalFiles').textContent = totalFiles;
     document.getElementById('albumsSubtitle').textContent = `INDEXED: ${albums.length} ALBUMS`;
-  } catch (e) {}
+  } catch (e) {
+    console.error('Dashboard update failed:', e);
+  }
 }
 
 async function createAlbum() {
@@ -775,18 +912,25 @@ function uploadSingleFile(file, album, pin, index) {
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
         const percent = (e.loaded / e.total) * 100;
-        document.getElementById(`file-bar-${index}`).style.width = percent + '%';
+        const bar = document.getElementById(`file-bar-${index}`);
+        if (bar) bar.style.width = percent + '%';
       }
     };
 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        document.getElementById(`file-status-${index}`).textContent = 'COMPLETE';
-        document.getElementById(`file-status-${index}`).style.color = 'var(--success)';
+        const status = document.getElementById(`file-status-${index}`);
+        if (status) {
+          status.textContent = 'COMPLETE';
+          status.style.color = 'var(--success)';
+        }
         resolve();
       } else {
-        document.getElementById(`file-status-${index}`).textContent = 'FAILED';
-        document.getElementById(`file-status-${index}`).style.color = 'var(--danger)';
+        const status = document.getElementById(`file-status-${index}`);
+        if (status) {
+          status.textContent = 'FAILED';
+          status.style.color = 'var(--danger)';
+        }
         reject(xhr.responseText || 'Upload failed');
       }
     };
@@ -833,7 +977,8 @@ async function processUploadQueue() {
   let successCount = 0;
 
   for (let i = 0; i < files.length; i++) {
-    document.getElementById(`file-item-${i}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const fileItem = document.getElementById(`file-item-${i}`);
+    if (fileItem) fileItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
     try {
       await uploadSingleFile(files[i], album, pin, i);
       successCount++;
@@ -900,8 +1045,15 @@ async function deleteMedia(album, file) {
   } catch (e) { showStatus('Delete Failed', 'error'); }
 }
 
-// Init
-checkPin();
+document.addEventListener('keydown', function(e) {
+    const modal = document.getElementById('pinModal');
+    if (modal.style.display === 'flex' && e.key === 'Enter') {
+        const activeElement = document.activeElement;
+        if (activeElement && activeElement.id === 'newPinInput') {
+            savePin();
+        }
+    }
+});
 </script>
 </body>
 </html>
