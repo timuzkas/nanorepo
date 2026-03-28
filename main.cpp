@@ -370,8 +370,100 @@ int main() {
     svr.Get("/admin", serveAdmin);
     svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
         auto albums = listAlbums();
-        if (albums.empty()) res.set_content("No albums.", "text/plain");
-        else res.set_redirect(("/" + url_encode(albums[0])).c_str());
+        if (albums.empty()) {
+            string html = R"(<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Gallery</title>
+    <style>
+        :root {
+            --bg: #ffffff; --surface: #f3f4f6; --text: #000000;
+            --text-secondary: #666666; --border: #e5e5e5; --accent: #2563eb;
+        }
+        [data-theme="dark"] {
+            --bg: #0a0a0a; --surface: #1a1a1a; --text: #ffffff;
+            --text-secondary: #a1a1aa; --border: #333333; --accent: #60a5fa;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg); color: var(--text); min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .container { text-align: center; padding: 2rem; max-width: 400px; width: 100%; }
+        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
+        p { color: var(--text-secondary); margin-bottom: 2rem; }
+        .form-group { margin-bottom: 1rem; text-align: left; }
+        label { display: block; font-size: 0.875rem; margin-bottom: 0.5rem; color: var(--text-secondary); }
+        input {
+            width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px;
+            font-size: 1rem; background: var(--surface); color: var(--text);
+        }
+        input:focus { outline: none; border-color: var(--accent); }
+        button {
+            width: 100%; padding: 0.75rem; background: var(--accent); color: white;
+            border: none; border-radius: 8px; font-size: 1rem; cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        .error { color: #dc2626; font-size: 0.875rem; margin-top: 1rem; }
+        .success { color: #16a34a; font-size: 0.875rem; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to Photo Gallery</h1>
+        <p>Create your first album to get started</p>
+        <form id="createForm">
+            <div class="form-group">
+                <label for="albumName">Album Name</label>
+                <input type="text" id="albumName" name="name" required placeholder="e.g., Vacation 2024">
+            </div>
+            <div class="form-group">
+                <label for="pin">PIN</label>
+                <input type="password" id="pin" name="pin" required placeholder="Enter your PIN">
+            </div>
+            <button type="submit" id="submitBtn">Create Album</button>
+        </form>
+        <div id="message"></div>
+    </div>
+    <script>
+        const theme = localStorage.getItem('theme') || 'light';
+        if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        document.getElementById('createForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const msg = document.getElementById('message');
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+            msg.className = '';
+            msg.textContent = '';
+            try {
+                const res = await fetch('/api/albums', {
+                    method: 'POST',
+                    headers: { 'X-PIN': document.getElementById('pin').value },
+                    body: new URLSearchParams({ name: document.getElementById('albumName').value })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                msg.className = 'success';
+                msg.textContent = 'Album created! Redirecting...';
+                setTimeout(() => window.location.reload(), 1000);
+            } catch (err) {
+                msg.className = 'error';
+                msg.textContent = err.message;
+                btn.disabled = false;
+                btn.textContent = 'Create Album';
+            }
+        });
+    </script>
+</body>
+</html>)";
+            res.set_content(html, "text/html");
+        } else {
+            res.set_redirect(("/" + url_encode(albums[0])).c_str());
+        }
     });
     svr.Get("/:event", serveGallery);
     svr.Get("/uploads/:event/:filename", serveFile);
