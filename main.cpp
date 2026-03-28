@@ -60,12 +60,11 @@ bool auth(const httplib::Request& req) {
 }
 
 void loadPin() {
-    if (fs::exists(PIN_FILE)) {
+    if (getenv("PIN")) {
+        PIN = getenv("PIN");
+    } else if (fs::exists(PIN_FILE)) {
         ifstream f(PIN_FILE);
         if (f) getline(f, PIN);
-    } else if (getenv("PIN")) {
-        PIN = getenv("PIN");
-        ofstream(PIN_FILE) << PIN;
     }
 }
 
